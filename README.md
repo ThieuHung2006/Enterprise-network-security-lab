@@ -231,7 +231,7 @@ To shield the enterprise border gateway from route hijacking, unauthorized BGP s
    - **Outbound (`OUT_TO_ISP`)**: Restricts enterprise route advertisement solely to the owned public allocation (`203.0.113.0/30`), eliminating accidental RFC 1918 leaks and unauthorized transit service.
 
 *Validation:* The following output confirms the established BGP state, TCP MD5 authentication, and active prefix-list enforcement on the ASBR:
-![BGP Hardening PoC](ebgp-hardening-poc.png)
+![BGP Hardening PoC](images/ebgp-hardening-poc.png)
 
 ## 4.2. Internal Transit (OSPF Area 0, MPLS LDP & NAT Overload)
 - **OSPF Area 0 Core Fabric**: Established reliable interior dynamic routing spanning ASBR, CORE_ROUTER, and DIST_SWITCH. ASBR injects default routing downward via `default-information originate always`.
@@ -247,33 +247,33 @@ The screenshots below come from the monitoring tools and network devices used du
 
 NetFlow summarizes traffic as *flows* (source and destination address, protocol, ports, packet and byte counts). That is enough to see who is talking, how much, and on which ports, without capturing packets.
 
-![Kali Ping Test](kali_icmp_ping_test.png)
+![Kali Ping Test](images/kali_icmp_ping_test.png)
 *Figure 17: test traffic: ICMP echo requests generated from the Kali node.*
 
-![Router Cache](core_router_flow_cache.png)
+![Router Cache](images/core_router_flow_cache.png)
 *Figure 18: the flow cache on `CORE_ROUTER` listing the test traffic as flows.*
 
-![DoS Flood 1](netflow_icmp_flood_dos_summary.png)
+![DoS Flood 1](images/netflow_icmp_flood_dos_summary.png)
 <br>
-![DoS Flood 2](netflow_icmp_flood_dos_2.png)
+![DoS Flood 2](images/netflow_icmp_flood_dos_2.png)
 *Figures 19 and 20: an ICMP flood as seen in NetFlow data.*
 
-![Top Talkers](netflow_top5_ip_bytes_2.png)
+![Top Talkers](images/netflow_top5_ip_bytes_2.png)
 *Figure 21: top talkers by IP address and bytes.*
 
-![C2 Traffic](netflow_threat_hunting_c2_beaconing.png)
+![C2 Traffic](images/netflow_threat_hunting_c2_beaconing.png)
 *Figure 22: threat hunting: reverse-shell style traffic on TCP port 4444.*
 
 ### Log integrity and alert review
 
-![Log Hardening](log_hardening_chattr_append_2.png)
+![Log Hardening](images/log_hardening_chattr_append_2.png)
 *Figure 23: log file protection with `chattr +a`.*
 The `a` attribute makes the syslog file append-only: new lines can be added, but existing entries cannot be edited or truncated unless the attribute is removed first (which requires root). This protects the evidence from accidental or casual tampering.
 
-![Core Telemetry](syslog-core-telemetry_2.png)
+![Core Telemetry](images/syslog-core-telemetry_2.png)
 *Figure 24: routing and interface events from the core devices collected by the syslog server.*
 
-![Security Alerts](syslog_security_alerts.png)
+![Security Alerts](images/syslog_security_alerts.png)
 *Figure 25: security alerts collected centrally: Port-Security events and BGP session flaps.*
 # 5. Resume & CV Highlights
 
