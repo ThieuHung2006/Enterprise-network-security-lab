@@ -44,6 +44,8 @@ Each scenario in this document follows the same pattern: **threat â†’ defense â†
 | **Attacker (Kali)** | `eth0` | `192.168.10.x/24` | Penetration-testing node (Yersinia, dnsmasq, Scapy) |
 
 > The lab uses documentation ranges (`203.0.113.0/24`, AS 64496) and a private ASN (65000) because it is not connected to the real Internet.
+>
+> Device configurations are in the `configs/` folder (secrets removed).
 
 ---
 
@@ -229,6 +231,18 @@ The border router is the point where external parties can send traffic at the ne
    - **Inbound (`IN_FROM_ISP`):** only the default route (`0.0.0.0/0`) and the test address `8.8.8.8/32` are accepted. Bogons and unintended transit prefixes are rejected.
    - **Outbound (`OUT_TO_ISP`):** only the owned public allocation (`203.0.113.0/30`) is advertised. This stops RFC 1918 prefixes from leaking and stops the router from acting as transit.
 
+**Evidence**
+
+![eBGP Hardening](images/ebgp-hardening-poc.png)
+
+*Figure 16b: eBGP hardening on `ASBR`: neighbor configuration, session state and the two prefix-lists (the MD5 key is blacked out).*
+
+- **Neighbor configuration:** the `router bgp 65000` section shows all three controls on the single peer `203.0.113.2` (AS 64496): the MD5 `password`, `ttl-security hops 1`, and the prefix-lists `IN_FROM_ISP` (in) and `OUT_TO_ISP` (out).
+- **Session state:** the neighbor is `Established` (up for 00:10:03), and the output confirms that both prefix filters are attached to the session. The protections therefore do not stop the legitimate peer from coming up.
+- **Prefix-lists:** `IN_FROM_ISP` permits only `0.0.0.0/0` and `8.8.8.8/32`, and `OUT_TO_ISP` permits only `203.0.113.0/30`. Each ends with an explicit `deny 0.0.0.0/0 le 32`, so every other prefix is rejected in that direction.
+
+This screenshot proves that the controls are configured and that the session works with them. It does not yet show them blocking anything. A negative test is listed in section 6.
+
 > In this lab the "owned allocation" is the `/30` peering subnet itself, which is a simplification. A real deployment would advertise the public block assigned to the enterprise.
 
 ## 4.2. Internal transit (OSPF Area 0, MPLS LDP and NAT overload)
@@ -317,4 +331,5 @@ Together, these two screenshots show that infrastructure events and security eve
 - **BGP:** MD5 is a legacy mechanism (TCP-AO is the modern option), and the outbound prefix-list advertises the peering `/30` rather than a real public block.
 - **Scope of L2 controls:** DHCP Snooping and DAI cover VLAN 10 only. Hosts with static IP addresses would need ARP ACLs, because DAI relies on the snooping binding table.
 - **Detection only for flow data:** NetFlow shows the flood and the port 4444 traffic, but no automated response is attached to those findings.
-- **Next steps:** 802.1X or additional port controls, rate limiting on DHCP and ARP, alerting on NetFlow anomalies, and publishing device configurations in a `configs/` folder with secrets removed.
+- **BGP negative test:** the BGP controls are shown as configuration with a working session (Figure 16b). Still to add: `advertised-routes` output, and a test where a peer with a wrong MD5 key or a multi-hop source is rejected (the `%TCP-6-BADAUTH` log).
+- **Next steps:** 802.1X or additional port controls, rate limiting on DHCP and ARP, and alerting on NetFlow anomalies.
