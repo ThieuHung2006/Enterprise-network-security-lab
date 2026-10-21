@@ -255,25 +255,25 @@ This screenshot proves that the controls are configured and that the session wor
 
 The screenshots below come from the monitoring tools and network devices used during testing.
 
-> **[TODO: add two lines describing the NetFlow setup: exporter interface(s), collector or tool used, and NetFlow version.]**
+**NetFlow Setup Overview:** NetFlow v9 is configured on the `CORE_ROUTER` with ingress/egress flow export enabled on all primary interfaces (Ethernet0/0, 0/1, and 0/2). The flow data is transmitted to the `Syslog-NOC` server (10.10.99.10) over UDP port 2055, where it is collected, rotated, and analyzed using the `nfcapd` and `nfdump` toolset.
 
 ### Traffic visibility with NetFlow (`CORE_ROUTER`)
 
 NetFlow summarizes traffic as *flows* (source and destination address, protocol, ports, packet and byte counts). That is enough to see who is talking, how much, and on which ports, without capturing packets.
 
-![Kali Ping Test](image_5e5726.png)
+![Kali Ping Test](kali_icmp_ping_test.png)
 
 *Figure 17: test traffic: ICMP echo requests generated from the Kali node.*
 
 This is the traffic that produces the first flow records. A small, known stream makes it easy to find in the flow data.
 
-![Router Cache](image_5e5b40.png)
+![Router Cache](core_router_flow_cache.png)
 
 *Figure 18: the flow cache on `CORE_ROUTER` listing the test traffic as flows.*
 
 The ping traffic appears as flow entries, which confirms that NetFlow is collecting data on the core router.
 
-![DoS Flood 1](image_5e6305.png)
+![DoS Flood 1](netflow_icmp_flood_dos_summary.png)
 
 ![DoS Flood 2](netflow_icmp_flood_dos.png)
 
@@ -287,7 +287,7 @@ During a flood, the flow from the attacking host stands out by its packet and by
 
 Ranking hosts by bytes is the quickest way to find the source of unusual load. The flood source should be at the top of this list.
 
-![C2 Traffic](netflow_reverse_shell_port_4444.png)
+![C2 Traffic](netflow_threat_hunting_c2_beaconing.png)
 
 *Figure 22: threat hunting: reverse-shell style traffic on TCP port 4444.*
 
@@ -301,16 +301,15 @@ Flow records include destination ports, so unusual ports can be searched for dir
 
 The `a` attribute makes the syslog file append-only: new lines can be added, but existing entries cannot be edited or truncated unless the attribute is removed first (which requires root). This protects the evidence from accidental or casual tampering.
 
-![Core Telemetry](syslog-core-telemetry.png)
+![Core Telemetry](syslog_core_telemetry_events.png)
 
 *Figure 24: routing and interface events from the core devices collected by the syslog server.*
 
-![Security Alerts](security-alerts.png)
+![Security Alerts](syslog_security_alerts.png)
 
 *Figure 25: security alerts collected centrally: Port-Security events and BGP session flaps.*
 
 Together, these two screenshots show that infrastructure events and security events both end up in one place, which is what the NOC would review.
-
 ---
 
 # 5. Resume & CV Highlights
