@@ -172,319 +172,55 @@ Moving beyond standard routing configurations, this portfolio demonstrates real-
 
 ---
 
-## 🌐 4. WAN Edge & Core Infrastructure Hardening
+# 4. WAN Edge & Core Infrastructure Hardening
 
-### 4.1. Edge BGP Peering Security (ASBR $\leftrightarrow$ ISP_PEER)
+## 4.1. Edge BGP Peering Security (ASBR ↔ ISP_PEER)
 To shield the enterprise border gateway from route hijacking, unauthorized BGP session establishment, and off-path TCP attacks, three defensive mechanisms were instituted:
-1. **RFC 2385 TCP MD5 Signature:** Applied cryptographic message integrity verification across TCP port $179$ (`password CiscoBGP@123`). Unauthorized peers transmitting synchronization or reset packets are dropped at the kernel level (`%TCP-6-BADAUTH`).
-2. **RFC 5082 Generalized TTL Security Mechanism (GTSM):** Configured `neighbor 203.0.113.2 ttl-security hops 1`. BGP packets are transmitted with $\text{TTL} = 255$, and the receiving interface accepts only packets where $\text{TTL} \ge 254$. This completely neutralizes multi-hop spoofed packets injected from the public Internet.
-3. **Route Policy Enforcement (Prefix-Lists):**
-   * **Inbound (`IN_FROM_ISP`):** Restricts ingress updates strictly to the Default Route (`0.0.0.0/0`) and specific test IP (`8.8.8.8/32`), rejecting Bogons and unintended transit prefixes.
-   * **Outbound (`OUT_TO_ISP`):** Restricts enterprise route advertisement solely to the owned public allocation (`203.0.113.0/30`), eliminating accidental RFC 1918 leaks and unauthorized transit service.
 
-### 4.2. Internal Transit (OSPF Area 0, MPLS LDP & NAT Overload)
-* **OSPF Area 0 Core Fabric:** Established reliable interior dynamic routing spanning `ASBR`, `CORE_ROUTER`, and `DIST_SWITCH`. ASBR injects default routing downward via `default-information originate always`.
-* **MPLS Core:** Enabled MPLS tag forwarding across Core transit links (`mpls ip`) utilizing reserved label spaces (`100 - 199`) to demonstrate high-throughput label-switched paths.
-* **Edge Source PAT (NAT Overload):** Configured standardized overload translation on ASBR (`interface Ethernet0/1 overload`), converting internal corporate subnets (`192.168.10.0/24`, `10.10.99.0/24`, `10.0.0.0/16`) to the routable interface address for full outbound Internet access.
+1. **RFC 2385 TCP MD5 Signature**: Applied cryptographic message integrity verification across TCP port 179 (password `CiscoBGP@123`). Unauthorized peers transmitting synchronization or reset packets are dropped at the kernel level (`%TCP-6-BADAUTH`).
+2. **RFC 5082 Generalized TTL Security Mechanism (GTSM)**: Configured `neighbor 203.0.113.2 ttl-security hops 1`. BGP packets are transmitted with TTL=255, and the receiving interface accepts only packets where TTL≥254. This completely neutralizes multi-hop spoofed packets injected from the public Internet.
+3. **Route Policy Enforcement (Prefix-Lists)**:
+   - **Inbound (`IN_FROM_ISP`)**: Restricts ingress updates strictly to the Default Route (`0.0.0.0/0`) and specific test IP (`8.8.8.8/32`), rejecting Bogons and unintended transit prefixes.
+   - **Outbound (`OUT_TO_ISP`)**: Restricts enterprise route advertisement solely to the owned public allocation (`203.0.113.0/30`), eliminating accidental RFC 1918 leaks and unauthorized transit service.
 
----
+## 4.2. Internal Transit (OSPF Area 0, MPLS LDP & NAT Overload)
+- **OSPF Area 0 Core Fabric**: Established reliable interior dynamic routing spanning ASBR, CORE_ROUTER, and DIST_SWITCH. ASBR injects default routing downward via `default-information originate always`.
+- **MPLS Core**: Enabled MPLS tag forwarding across Core transit links (`mpls ip`) utilizing reserved label spaces (100 - 199) to demonstrate high-throughput label-switched paths.
+- **Edge Source PAT (NAT Overload)**: Configured standardized overload translation on ASBR (`interface Ethernet0/1 overload`), converting internal corporate subnets (`192.168.10.0/24`, `10.10.99.0/24`, `10.0.0.0/16`) to the routable interface address for full outbound Internet access.
 
-## ⚙️ 5. Production Configuration Files
+## 4.3. Technical Evidence & Verification (Screenshots)
+*Dưới đây là các bằng chứng kỹ thuật được trích xuất từ hệ thống giám sát và thiết bị mạng trong quá trình kiểm thử:*
 
-<details>
-<summary><b>🔹 ACCESS_SWITCH (Layer 2 Hardening)</b></summary>
+**1. Data Plane Verification & NetFlow Telemetry**
+* **ICMP Ping Generation (Kali Linux):** 
+  ![Kali Ping Test](image_5e5726.png)
+* **Router Flow Cache (CORE_ROUTER):** 
+  ![Router Cache](image_5e5b40.png)
+* **DoS Flood Bandwidth Saturation Analysis:** 
+  ![DoS Flood 1](image_5e6305.png)
+  <br>
+  ![DoS Flood 2](netflow_icmp_flood_dos.png)
+* **Top Talkers (IP/Bytes):** 
+  ![Top Talkers](netflow_top5_ip_bytes.png)
+* **Threat Hunting (C2 Beaconing / Port 4444):** 
+  ![C2 Traffic](netflow_reverse_shell_port_4444.png)
 
-```text
-configure terminal
-hostname ACCESS_SWITCH
-no ip domain lookup
-service timestamps debug datetime msec
-service timestamps log datetime msec
-
-! --- LAYER 2 DEFENSE: SNOOPING & DAI ---
-ip dhcp snooping
-ip dhcp snooping vlan 10
-no ip dhcp snooping information option
-
-ip arp inspection vlan 10
-ip arp inspection validate src-mac dst-mac ip
-
-! --- TRUSTED UPLINK TO DISTRIBUTION ---
-interface Ethernet0/0
- description UPLINK_TRUNK_TO_DIST_SWITCH
- switchport trunk encapsulation dot1q
- switchport mode trunk
- ip dhcp snooping trust
- ip arp inspection trust
- no shutdown
- exit
-
-! --- HARDENED ACCESS PORTS ---
-interface range Ethernet0/1 - 2
- description SECURE_ACCESS_PORT
- switchport mode access
- switchport access vlan 10
- spanning-tree portfast
- spanning-tree bpduguard enable
- switchport port-security
- switchport port-security maximum 1
- switchport port-security mac-address sticky
- switchport port-security violation shutdown
- ip dhcp snooping limit rate 15
- no shutdown
- exit
-
-! --- MANAGEMENT SVI & LOGGING ---
-interface Vlan10
- ip address 192.168.10.2 255.255.255.0
- no shutdown
- exit
-
-ip default-gateway 192.168.10.1
-logging on
-logging host 10.10.99.10
-logging trap notifications
-end
-write memory
-```
-</details>
-
-<details>
-<summary><b>🔹 DIST_SWITCH (L3 Core Routing & DHCP Services)</b></summary>
-
-```text
-configure terminal
-hostname DIST_SWITCH
-ip routing
-no ip domain lookup
-service timestamps log datetime msec
-
-! --- DHCP SERVICE POOL ---
-ip dhcp excluded-address 192.168.10.1 192.168.10.10
-ip dhcp pool VLAN10_POOL
- network 192.168.10.0 255.255.255.0
- default-router 192.168.10.1
- dns-server 8.8.8.8
- exit
-
-! --- DOWNLINK TRUNK ---
-interface Ethernet0/0
- description DOWNLINK_TO_ACCESS_SWITCH
- switchport trunk encapsulation dot1q
- switchport mode trunk
- no shutdown
- exit
-
-! --- ROUTED UPLINK TO CORE ---
-interface Ethernet0/1
- no switchport
- description ROUTED_UPLINK_TO_CORE
- ip address 10.0.1.2 255.255.255.252
- no shutdown
- exit
-
-! --- SVI GATEWAY ---
-interface Vlan10
- description DEFAULT_GATEWAY_VLAN10
- ip address 192.168.10.1 255.255.255.0
- no shutdown
- exit
-
-! --- OSPF ROUTING ---
-router ospf 1
- router-id 1.1.1.1
- network 10.0.1.0 0.0.0.3 area 0
- network 192.168.10.0 0.0.0.255 area 0
- exit
-
-logging on
-logging host 10.10.99.10
-logging trap notifications
-end
-write memory
-```
-</details>
-
-<details>
-<summary><b>🔹 CORE_ROUTER (Transit Hub, MPLS & Telemetry)</b></summary>
-
-```text
-configure terminal
-hostname CORE_ROUTER
-no ip domain lookup
-service timestamps log datetime msec
-ip cef
-
-interface Ethernet0/0
- description DOWNLINK_TO_DIST
- ip address 10.0.1.1 255.255.255.252
- no shutdown
- exit
-
-interface Ethernet0/1
- description UPLINK_TO_ASBR
- ip address 10.0.0.2 255.255.255.252
- mpls ip
- no shutdown
- exit
-
-interface Ethernet0/2
- description TRANSIT_TO_NOC_SUBNET
- ip address 10.10.99.1 255.255.255.0
- no shutdown
- exit
-
-router ospf 1
- router-id 2.2.2.2
- network 10.0.1.0 0.0.0.3 area 0
- network 10.0.0.0 0.0.0.3 area 0
- network 10.10.99.0 0.0.0.255 area 0
- exit
-
-mpls ip
-mpls label range 100 199
-mpls ldp router-id Ethernet0/1 force
-
-logging on
-logging host 10.10.99.10
-logging trap notifications
-end
-write memory
-```
-</details>
-
-<details>
-<summary><b>🔹 ASBR (Edge Boundary, BGP Security & NAT)</b></summary>
-
-```text
-configure terminal
-hostname ASBR
-no ip domain lookup
-service timestamps debug datetime msec
-service timestamps log datetime msec
-ip cef
-
-interface Ethernet0/0
- description DOWNLINK_TO_CORE
- ip address 10.0.0.1 255.255.255.252
- ip nat inside
- duplex auto
- no shutdown
- exit
-
-interface Ethernet0/1
- description WAN_UPLINK_TO_ISP
- ip address 203.0.113.1 255.255.255.252
- ip nat outside
- duplex auto
- no shutdown
- exit
-
-! --- BGP FILTER LISTS ---
-ip prefix-list IN_FROM_ISP seq 5 permit 0.0.0.0/0
-ip prefix-list IN_FROM_ISP seq 10 permit 8.8.8.8/32
-ip prefix-list IN_FROM_ISP seq 100 deny 0.0.0.0/0 le 32
-
-ip prefix-list OUT_TO_ISP seq 5 permit 203.0.113.0/30
-ip prefix-list OUT_TO_ISP seq 100 deny 0.0.0.0/0 le 32
-
-! --- BGP WITH MD5 & GTSM ---
-router bgp 65000
- bgp router-id 10.0.0.1
- bgp log-neighbor-changes
- neighbor 203.0.113.2 remote-as 64496
- neighbor 203.0.113.2 description PEERING_ISP
- neighbor 203.0.113.2 password CiscoBGP@123
- neighbor 203.0.113.2 ttl-security hops 1
- neighbor 203.0.113.2 prefix-list IN_FROM_ISP in
- neighbor 203.0.113.2 prefix-list OUT_TO_ISP out
- exit
-
-router ospf 1
- router-id 3.3.3.3
- network 10.0.0.0 0.0.0.3 area 0
- default-information originate always
- exit
-
-! --- OUTBOUND PAT ---
-ip access-list standard ACL_NAT
- permit 192.168.10.0 0.0.0.255
- permit 10.10.99.0 0.0.0.255
- permit 10.0.0.0 0.0.255.255
- exit
-
-ip nat inside source list ACL_NAT interface Ethernet0/1 overload
-
-logging on
-logging host 10.10.99.10
-logging trap notifications
-end
-write memory
-```
-</details>
-
-<details>
-<summary><b>🔹 ISP_PEER (Upstream Provider Simulation)</b></summary>
-
-```text
-configure terminal
-hostname ISP_PEER
-no ip domain lookup
-
-interface Ethernet0/0
- description UPLINK_TO_ASBR
- ip address 203.0.113.2 255.255.255.252
- no shutdown
- exit
-
-interface Loopback0
- description SIMULATED_PUBLIC_INTERNET_DNS
- ip address 8.8.8.8 255.255.255.255
- no shutdown
- exit
-
-router bgp 64496
- bgp log-neighbor-changes
- neighbor 203.0.113.1 remote-as 65000
- neighbor 203.0.113.1 description PEERING_ASBR
- neighbor 203.0.113.1 password CiscoBGP@123
- neighbor 203.0.113.1 ttl-security hops 1
- neighbor 203.0.113.1 default-originate
- network 8.8.8.8 mask 255.255.255.255
- exit
-end
-write memory
-```
-</details>
-
-<details>
-<summary><b>🔹 Syslog_NOC Collector (Ubuntu / Debian Linux)</b></summary>
-
-```bash
-# Enable UDP port 514 within rsyslog
-sudo sed -i 's/#module(load="imudp")/module(load="imudp")/g' /etc/rsyslog.conf
-sudo sed -i 's/#input(type="imudp" port="514")/input(type="imudp" port="514")/g' /etc/rsyslog.conf
-
-# Configure custom Cisco log rules
-sudo mkdir -p /var/log/cisco
-cat << 'EOF' | sudo tee /etc/rsyslog.d/10-cisco-security.conf
-if $msg contains 'BGP' or $msg contains 'ADJCHANGE' then /var/log/cisco/bgp.log
-if $fromhost-ip startswith '10.' or $fromhost-ip startswith '192.168.' then /var/log/cisco/devices.log
-EOF
-
-# Restart service and verify listener
-sudo systemctl restart rsyslog
-sudo ss -ulnp | grep 514
-```
-</details>
+**2. System Logging & Infrastructure Hardening**
+* **Log File Hardening (chattr +a):** 
+  ![Log Hardening](log_hardening_chattr_append.png)
+* **Core Telemetry Events:** 
+  ![Core Telemetry](syslog-core-telemetry.png)
+* **Security Alerts (Port Security & BGP Flaps):** 
+  ![Security Alerts](security-alerts.png)
 
 ---
 
-## 💼 6. Resume & CV Highlights (STAR-Format Bullet Points)
+# 5. Resume & CV Highlights (STAR-Format Bullet Points)
+*Tailored for direct inclusion under the Projects / Technical Experience section on resumes for Network Engineer, Network Security Engineer, or SOC Analyst applications:*
 
-Tailored for direct inclusion under the **Projects / Technical Experience** section on resumes for **Network Engineer**, **Network Security Engineer**, or **SOC Analyst** applications:
-
-* **Engineered a resilient 3-tier enterprise network topology** across Access, Distribution, Core, and WAN Edge using Cisco IOS/IOL within EVE-NG, implementing **OSPF Area 0**, **MPLS LDP**, and **PAT (NAT Overload)** for zero-downtime routing.
-* **Spearheaded Layer 2 defense-in-depth mitigations**, successfully neutralizing simulated Red Team STP attacks, MAC spoofing, rogue DHCP servers, and MITM ARP cache poisoning through **BPDU Guard, Port-Security Sticky, DHCP Snooping, and Dynamic ARP Inspection (DAI)**.
+* **Engineered** a resilient 3-tier enterprise network topology across Access, Distribution, Core, and WAN Edge using Cisco IOS/IOL within EVE-NG, implementing OSPF Area 0, MPLS LDP, and PAT (NAT Overload) for zero-downtime routing.
+* **Spearheaded** Layer 2 defense-in-depth mitigations, successfully neutralizing simulated Red Team STP attacks, MAC spoofing, rogue DHCP servers, and MITM ARP cache poisoning through BPDU Guard, Port-Security Sticky, DHCP Snooping, and Dynamic ARP Inspection (DAI).
+* **Hardened** public edge eBGP peering by mandating RFC 2385 TCP MD5 authentication, RFC 5082 Generalized TTL Security Mechanism (GTSM), and two-way Prefix-List route filtering, protecting border infrastructure from BGP hijacking and unauthorized transit injection.
+* **Architected** centralized network telemetry with a Linux-based Syslog server (rsyslog & tcpdump over UDP 514), capturing real-time hardware faults, port error-disable events, and routing adjacency flaps for immediate SOC escalation.**BPDU Guard, Port-Security Sticky, DHCP Snooping, and Dynamic ARP Inspection (DAI)**.
 * **Hardened public edge eBGP peering** by mandating **RFC 2385 TCP MD5 authentication**, **RFC 5082 Generalized TTL Security Mechanism (GTSM)**, and two-way **Prefix-List route filtering**, protecting border infrastructure from BGP hijacking and unauthorized transit injection.
 * **Architected centralized network telemetry** with a Linux-based **Syslog server** (`rsyslog` & `tcpdump` over UDP $514$), capturing real-time hardware faults, port error-disable events, and routing adjacency flaps for immediate SOC escalation.
