@@ -1,0 +1,64 @@
+hostname ACCESS_SWITCH
+no ip domain-lookup
+
+! --- Tạo các VLAN cần thiết ---
+vlan 10
+ name CLIENT_VLAN
+vlan 20
+ name SERVER_VLAN
+vlan 99
+ name MGMT_NOC
+exit
+
+! --- Cấu hình IP quản trị ---
+interface Vlan99
+ ip address 10.10.99.3 255.255.255.0
+ no shutdown
+exit
+ip default-gateway 10.10.99.2
+
+! --- Cấu hình cổng Uplink nối DIST_SWITCH ---
+interface Ethernet0/0
+ description TRUNK-UP-TO-DIST_SWITCH
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+ switchport trunk allowed vlan 10,20,99
+ no shutdown
+exit
+
+! --- Cấu hình Cổng Access gắn Host (Attacker: e0/1, Victim: e0/2) ---
+interface range Ethernet0/1 - 2
+ description USER-ACCESS-PORTS
+ switchport mode access
+ switchport access vlan 10
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+ ! Kích hoạt Port-Security chống cắm switch lậu / MAC Flooding
+ switchport port-security
+ switchport port-security maximum 2
+ switchport port-security violation restrict
+ switchport port-security mac-address sticky
+ no shutdown
+exit
+
+! --- Kích hoạt các cơ chế phòng vệ Layer 2 Security ---
+! 1. DHCP Snooping (Chống Rogue DHCP)
+ip dhcp snooping
+ip dhcp snooping vlan 10
+no ip dhcp snooping information option
+! Thiết lập cổng Trunk tin cậy cho DHCP Server
+interface Ethernet0/0
+ ip dhcp snooping trust
+exit
+
+! 2. Dynamic ARP Inspection (DAI - Chống ARP Poisoning / Spoofing)
+ip arp inspection vlan 10
+ip arp inspection validate src-mac dst-mac ip
+interface Ethernet0/0
+ ip arp inspection trust
+exit
+
+! 3. STP Root Protection (Chống cướp quyền Root Bridge)
+interface Ethernet0/0
+ spanning-tree guard root
+exit

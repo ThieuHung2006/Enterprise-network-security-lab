@@ -1,0 +1,95 @@
+! --- Tên thiết bị & dịch vụ cơ bản ---
+hostname CORE_ROUTER
+no ip domain-lookup
+service timestamps debug datetime msec
+service timestamps log datetime msec
+
+! --- Cấu hình cổng kết nối ---
+! Kết nối xuống DIST_SWITCH (Transit Link)
+interface Ethernet0/0
+ description UPLINK-TO-DIST_SWITCH
+ ip address 10.0.0.1 255.255.255.252
+ ip nat inside
+ no shutdown
+exit
+
+! Kết nối ra nhà mạng ISP_PEER
+interface Ethernet0/1
+ description WAN-TO-ISP_PEER
+ ip address 203.0.113.1 255.255.255.252
+ ip nat outside
+ no shutdown
+exit
+
+! Kết nối vùng máy chủ giám sát / NOC
+interface Ethernet0/2
+ description LAN-TO-SYSLOG-NOC
+ ip address 10.10.99.1 255.255.255.0
+ ip nat inside
+ no shutdown
+exit
+
+! Loopback quản trị & Router ID
+interface Loopback99
+ description MANAGEMENT-LOOPBACK
+ ip address 10.10.99.254 255.255.255.255
+ no shutdown
+exit
+
+! --- Cấu hình NAT / PAT cho dải nội bộ ra ngoài Internet ---
+access-list 1 permit 192.168.10.0 0.0.0.255
+access-list 1 permit 10.10.99.0 0.0.0.255
+ip nat inside source list 1 interface Ethernet0/1 overload
+
+! --- Định tuyến nội bộ OSPF ---
+router ospf 1
+ router-id 1.1.1.1
+ network 10.0.0.0 0.0.0.3 area 0
+ network 10.10.99.0 0.0.0.255 area 0
+ default-information originate
+exit
+
+! --- Định tuyến BGP kết nối ISP ngoài biên ---
+router bgp 65001
+ bgp router-id 203.0.113.1
+ neighbor 203.0.113.2 remote-as 64496
+ neighbor 203.0.113.2 description ISP_PEER
+ neighbor 203.0.113.2 next-hop-self
+exit
+
+! ==========================================
+! 1. CẤU HÌNH SYSLOG CLIENT TRÊN ROUTER
+! ==========================================
+logging buffered 64000 informational
+logging host 10.10.99.10
+logging trap informational
+logging source-interface Ethernet0/2
+service timestamps log datetime msec localtime show-timezone
+
+! ==========================================
+! 2. CẤU HÌNH NETFLOW EXPORTER (NetFlow v9)
+! ==========================================
+! Chỉ định máy chủ nhận luồng NOC và cổng UDP 2055
+ip flow-export version 9
+ip flow-export destination 10.10.99.10 2055
+ip flow-export source Ethernet0/2
+
+! Tối ưu bộ đệm cho SOC: xả nhanh để thấy luồng tức thì
+ip flow-cache timeout active 1
+ip flow-cache timeout inactive 15
+
+! Gán NetFlow vào các giao diện cần giám sát lưu lượng
+interface Ethernet0/0
+ ip flow ingress
+ ip flow egress
+exit
+
+interface Ethernet0/1
+ ip flow ingress
+ ip flow egress
+exit
+
+interface Ethernet0/2
+ ip flow ingress
+ ip flow egress
+exit

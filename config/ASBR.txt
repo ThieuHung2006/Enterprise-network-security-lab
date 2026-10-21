@@ -1,0 +1,83 @@
+hostname ASBR
+no ip domain-lookup
+
+! --- Cấu hình cổng kết nối ---
+! Cổng nối nội bộ xuống CORE_ROUTER
+interface Ethernet0/0
+ description LINK-DOWN-TO-CORE_ROUTER
+ ip address 10.0.0.1 255.255.255.252
+ ip nat inside
+ no shutdown
+exit
+
+! Cổng WAN kết nối ra nhà mạng ISP
+interface Ethernet0/1
+ description WAN-TO-ISP_PEER
+ ip address 203.0.113.1 255.255.255.252
+ ip nat outside
+ no shutdown
+exit
+
+! Loopback nhận diện Router ID
+interface Loopback0
+ ip address 1.1.1.254 255.255.255.255
+ no shutdown
+exit
+
+! --- Cấu hình NAT / PAT (Dịch IP nội bộ ra WAN biên) ---
+! Cho phép dải client và dải quản trị NOC đi Internet
+access-list 1 permit 192.168.10.0 0.0.0.255
+access-list 1 permit 10.10.99.0 0.0.0.255
+ip nat inside source list 1 interface Ethernet0/1 overload
+
+! --- Định tuyến nội bộ OSPF ---
+! Nhận diện mạng lõi và phát tán default route cho CORE_ROUTER
+router ospf 1
+ router-id 1.1.1.254
+ network 10.0.0.0 0.0.0.3 area 0
+ default-information originate always
+exit
+
+! --- Định tuyến ngoài biên BGP kết nối ISP ---
+router bgp 65001
+ bgp router-id 203.0.113.1
+ neighbor 203.0.113.2 remote-as 64496
+ neighbor 203.0.113.2 description ISP_PEER
+ ! Quảng bá tuyến mạng nếu có (hoặc chỉ nhận default route từ ISP)
+ no auto-summary
+exit
+
+
+
+
+
+! ==========================================
+! 1. SYSLOG TRÊN ASBR (Đẩy về máy Syslog-NOC)
+! ==========================================
+service timestamps log datetime msec localtime show-timezone
+logging buffered 64000 informational
+logging host 10.10.99.10
+logging trap informational
+logging source-interface Ethernet0/0
+
+! ==========================================
+! 2. NETFLOW V9 TRÊN ASBR (Bắt luồng NAT biên)
+! ==========================================
+ip flow-export version 9
+ip flow-export destination 10.10.99.10 2055
+ip flow-export source Ethernet0/0
+
+! Xả đệm nhanh phục vụ Threat Hunting & DoS
+ip flow-cache timeout active 1
+ip flow-cache timeout inactive 15
+
+! Bật NetFlow trên cả chiều vào và ra ở cổng WAN biên
+interface Ethernet0/1
+ ip flow ingress
+ ip flow egress
+exit
+
+interface Ethernet0/0
+ ip flow ingress
+ ip flow egress
+exit

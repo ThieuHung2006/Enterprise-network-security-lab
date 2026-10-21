@@ -1,0 +1,31 @@
+hostname ISP_PEER
+no ip domain-lookup
+
+! --- Cấu hình cổng WAN nối về doanh nghiệp (ASBR) ---
+interface Ethernet0/0
+ description WAN-TO-ENTERPRISE-ASBR
+ ip address 203.0.113.2 255.255.255.252
+ no shutdown
+exit
+
+! --- Giả lập dịch vụ Internet / DNS Server (8.8.8.8) ---
+interface Loopback0
+ description PUBLIC-DNS-SERVER
+ ip address 8.8.8.8 255.255.255.255
+ no shutdown
+exit
+
+! --- Định tuyến eBGP (AS 64496) ---
+router bgp 64496
+ bgp router-id 203.0.113.2
+ neighbor 203.0.113.1 remote-as 65001
+ neighbor 203.0.113.1 description ASBR_ENTERPRISE
+ ! Cấp Default Route (0.0.0.0/0) cho ASBR
+ neighbor 203.0.113.1 default-originate
+ ! Quảng bá IP giả lập ra Internet
+ network 8.8.8.8 mask 255.255.255.255
+ no auto-summary
+exit
+
+! Tuyến đường tĩnh nội bộ ISP để default-originate hoạt động mượt mà
+ip route 0.0.0.0 0.0.0.0 Null0

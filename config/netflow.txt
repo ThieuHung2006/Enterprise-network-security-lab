@@ -1,0 +1,169 @@
+==============================================================
+ CAU HINH NETFLOW COLLECTOR (nfcapd) CHUAN TREN UBUNTU SERVER
+==============================================================
+
+Muc tieu: cai dat nfdump, chay nfcapd nhu mot service systemd on dinh,
+nhan flow (NetFlow v5/v9, IPFIX) tu router/switch va luu ra file.
+
+Luu y so voi cau hinh goc:
+ - Can cai goi nfdump truoc.
+ - Nen chay bang user rieng thay vi root.
+ - Dung Type=simple (bo -D) thay vi Type=forking de systemd quan ly truc tiep.
+ - Can mo firewall cho UDP 2055.
+
+
+--------------------------------------------------------------
+1. CAI DAT NFDUMP
+--------------------------------------------------------------
+
+sudo apt update
+sudo apt install -y nfdump
+which nfcapd        # thuong la /usr/bin/nfcapd
+
+
+--------------------------------------------------------------
+2. TAO USER RIENG VA THU MUC LUU DU LIEU
+--------------------------------------------------------------
+
+sudo useradd -r -s /usr/sbin/nologin nfcapd
+sudo mkdir -p /var/log/netflow
+sudo chown nfcapd:nfcapd /var/log/netflow
+
+(Port 2055 > 1024 nen khong can quyen root.)
+
+
+--------------------------------------------------------------
+3. TAO SERVICE SYSTEMD
+--------------------------------------------------------------
+
+sudo nano /etc/systemd/system/nfcapd.service
+
+Noi dung file:
+
+[Unit]
+Description=NetFlow/IPFIX Collector (nfcapd)
+After=network.target
+
+[Service]
+Type=simple
+User=nfcapd
+Group=nfcapd
+ExecStart=/usr/bin/nfcapd -w -p 2055 -B 200000 -l /var/log/netflow -t 300 -S 1 -z
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+Y nghia tham so:
+ -p 2055   : cong UDP nhan flow
+ -l <dir>  : thu muc luu file
+ -t 300    : xoay file moi 300 giay (5 phut)
+ -w        : can thoi diem xoay file theo moc 5 phut
+ -B 200000 : kich thuoc buffer socket (luu luong lon thi tang len, vd 2000000)
+ -S 1      : chia thu muc con theo ngay (2026/10/21/)
+ -z        : nen file de tiet kiem dung luong
+
+Neu ban nfdump khong nhan tham so nao do, kiem tra bang: nfcapd -h
+
+
+--------------------------------------------------------------
+4. KICH HOAT SERVICE
+--------------------------------------------------------------
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now nfcapd
+sudo systemctl status nfcapd
+
+
+--------------------------------------------------------------
+5. MO FIREWALL
+--------------------------------------------------------------
+
+sudo ufw allow from <IP_thiet_bi_export> to any port 2055 proto udp
+
+Nen gioi han theo IP cua router/switch, khong nen mo cho tat ca.
+
+
+--------------------------------------------------------------
+6. CAU HINH THIET BI XUAT FLOW (EXPORTER)
+--------------------------------------------------------------
+
+Collector chi nhan du lieu khi co thiet bi gui toi.
+
+--- Cisco IOS ---
+
+ip flow-export version 9
+ip flow-export destination <IP_server> 2055
+ip flow-export source <interface>
+interface GigabitEthernet0/0
+ ip flow ingress
+ ip flow egress
+
+--- Linux lam exporter (softflowd) ---
+
+sudo apt install softflowd
+sudo softflowd -i eth0 -n <IP_server>:2055 -v 9
+
+
+--------------------------------------------------------------
+7. KIEM TRA HOAT DONG
+--------------------------------------------------------------
+
+# Port da lang nghe chua
+sudo ss -ulnp | grep 2055
+
+# Co goi tin den khong
+sudo tcpdump -ni any udp port 2055
+
+# Doi 5 phut roi xem file
+ls -lh /var/log/netflow/
+
+# Doc du lieu
+nfdump -R /var/log/netflow -n 10 -s srcip/bytes
+nfdump -R /var/log/netflow -s dstport/flows -n 10
+
+Luu y: file dang ghi co ten nfcapd.current.xxxx, sau moi 5 phut moi
+duoc doi ten thanh nfcapd.YYYYMMDDHHMM.
+
+
+--------------------------------------------------------------
+8. TU DONG XOA DU LIEU CU (TRANH DAY O DIA)
+--------------------------------------------------------------
+
+Dat gioi han dung luong hoac thoi gian:
+
+sudo -u nfcapd nfexpire -l /var/log/netflow -s 50G -t 30d
+
+Hoac them vao cron chay hang ngay:
+
+echo '0 2 * * * nfcapd /usr/bin/nfexpire -l /var/log/netflow -t 30d' | sudo tee /etc/cron.d/nfexpire
+
+(Neu muon nfcapd tu don, them -e vao ExecStart sau khi da thiet lap
+gioi han bang: nfexpire -u)
+
+
+--------------------------------------------------------------
+XU LY SU CO THUONG GAP
+--------------------------------------------------------------
+
+* Khong co file nao xuat hien:
+  Kiem tra tcpdump xem flow co den khong, roi kiem tra firewall va routing.
+
+* Loi permission:
+  Kiem tra lai: sudo chown nfcapd:nfcapd /var/log/netflow
+
+* Mat flow khi luu luong lon:
+  Tang -B, dong thoi tang net.core.rmem_max:
+
+  echo 'net.core.rmem_max=8388608' | sudo tee /etc/sysctl.d/99-netflow.conf
+  sudo sysctl --system
+
+* Xem log service:
+  journalctl -u nfcapd -f
+
+
+==============================================================
+Hien thi truc quan (dashboard): co the ket hop NfSen-NG,
+ElastiFlow hoac Grafana.
+==============================================================

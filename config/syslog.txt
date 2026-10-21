@@ -1,0 +1,255 @@
+==============================================================
+ CAU HINH RSYSLOG NHAN LOG THIET BI MANG TREN UBUNTU SERVER
+ (Ban da chinh sua cho chuan)
+==============================================================
+
+CAC LOI / DIEM CAN SUA SO VOI CAU HINH GOC
+--------------------------------------------------------------
+1. TRUNG LAP LISTENER: khai bao imudp/port 514 o ca network-devices.conf
+   va rsyslog.conf se gay loi "address already in use" / mo cong 2 lan.
+   => Chi khai bao MOT noi (khuyen nghi: rsyslog.conf).
+
+2. THU TU NAP FILE: rsyslog nap /etc/rsyslog.d/*.conf theo thu tu ABC.
+   File 50-default.conf (ghi vao /var/log/syslog) se duoc nap TRUOC file
+   "network-devices.conf" (chu cai dung sau so), nen lenh "stop" khong con
+   tac dung. => Doi ten file thanh 10-network-devices.conf.
+
+3. LOC LOG BAO MAT: nen dat ben trong dieu kien IP thiet bi mang, tranh
+   log cua chinh server Linux (co chua tu khoa tuong tu) lot vao file
+   security-alerts.log.
+
+4. QUYEN THU MUC/FILE: rsyslog tren Ubuntu chay bang user "syslog", can
+   tao truoc thu muc va file voi dung quyen.
+
+5. chattr +a: file phai ton tai truoc khi gan co. Dong thoi logrotate
+   khong the xoay file append-only => can chattr -a truoc khi xoay va
+   chattr +a sau khi xoay.
+
+6. FIREWALL: khong nen tat firewall. Chi mo cong UDP/TCP 514 cho IP thiet
+   bi mang. Neu bat TCP 514 thi phai mo ca TCP trong ufw.
+
+7. THIEU LOC ACL: mo ta co ACL nhung chua co tu khoa. Da bo sung
+   SEC-6-IPACCESSLOG.
+
+8. Nen kiem tra cu phap bang "rsyslogd -N1" truoc khi restart.
+
+
+--------------------------------------------------------------
+BUOC 1. TAO THU MUC VA FILE LUU TRU VOI DUNG QUYEN
+--------------------------------------------------------------
+
+sudo mkdir -p /var/log/network-devices
+sudo chown syslog:adm /var/log/network-devices
+sudo chmod 750 /var/log/network-devices
+
+sudo touch /var/log/network-devices/security-alerts.log
+sudo chown syslog:adm /var/log/network-devices/security-alerts.log
+sudo chmod 640 /var/log/network-devices/security-alerts.log
+
+
+--------------------------------------------------------------
+BUOC 2. BAT CONG NHAN SYSLOG (CHI KHAI BAO O MOT NOI)
+--------------------------------------------------------------
+
+sudo nano /etc/rsyslog.conf
+
+Bo dau # (uncomment) cac dong sau:
+
+# Provides UDP syslog reception
+module(load="imudp")
+input(type="imudp" port="514")
+
+# Provides TCP syslog reception (chi bat neu thiet bi dung TCP)
+module(load="imtcp")
+input(type="imtcp" port="514")
+
+LUU Y: KHONG lap lai cac dong nay trong file network-devices.conf.
+
+
+--------------------------------------------------------------
+BUOC 3. TAO FILE CAU HINH RIENG CHO THIET BI MANG
+--------------------------------------------------------------
+
+sudo nano /etc/rsyslog.d/10-network-devices.conf
+
+Noi dung:
+
+# Mau duong dan luu tru theo IP thiet bi, moi ngay 1 file
+template(name="PerDeviceLog" type="string"
+         string="/var/log/network-devices/%fromhost-ip%/%$YEAR%-%$MONTH%-%$DAY%.log")
+
+# Chi xu ly log den tu dai IP thiet bi mang
+if ($fromhost-ip startswith "10." or
+    $fromhost-ip startswith "192.168." or
+    $fromhost-ip startswith "203.0.113.") then {
+
+    # 1) Loc log bao mat dac biet (Port Security, DHCP Snooping, DAI, BGP, ACL)
+    if ($msg contains "PORT_SECURITY" or
+        $msg contains "DHCP_SNOOPING" or
+        $msg contains "SW_DAI" or
+        $msg contains "BGP-5-ADJCHANGE" or
+        $msg contains "SEC-6-IPACCESSLOG") then {
+        action(type="omfile"
+               file="/var/log/network-devices/security-alerts.log"
+               fileCreateMode="0640"
+               dirCreateMode="0750")
+    }
+
+    # 2) Luu toan bo log vao thu muc rieng cua tung thiet bi
+    action(type="omfile"
+           dynaFile="PerDeviceLog"
+           fileCreateMode="0640"
+           dirCreateMode="0750")
+
+    # 3) Tach khoi log he dieu hanh Linux (khong ghi vao /var/log/syslog)
+    stop
+}
+
+Chinh lai dai IP "10.", "192.168.", "203.0.113." cho dung voi mang thuc te.
+Co the thay bang dai chinh xac hon, vi du: startswith "10.10.1."
+
+
+--------------------------------------------------------------
+BUOC 4. KIEM TRA CU PHAP VA KHOI DONG LAI RSYSLOG
+--------------------------------------------------------------
+
+sudo rsyslogd -N1
+sudo systemctl restart rsyslog
+sudo systemctl status rsyslog
+
+(Neu rsyslogd -N1 bao loi thi sua truoc khi restart.)
+
+
+--------------------------------------------------------------
+BUOC 5. MO FIREWALL (KHONG TAT FIREWALL)
+--------------------------------------------------------------
+
+Nen gioi han theo IP/dai IP thiet bi mang:
+
+sudo ufw allow from 10.0.0.0/8 to any port 514 proto udp
+sudo ufw allow from 192.168.0.0/16 to any port 514 proto udp
+
+# Chi mo TCP 514 neu da bat imtcp o Buoc 2:
+sudo ufw allow from 10.0.0.0/8 to any port 514 proto tcp
+
+# Mo cong NetFlow (UDP 2055) neu server dong thoi la NetFlow collector:
+sudo ufw allow from 10.0.0.0/8 to any port 2055 proto udp
+
+sudo ufw reload
+sudo ufw status numbered
+
+Neu muon mo nhanh cho moi nguon (khong khuyen nghi):
+sudo ufw allow 514/udp
+sudo ufw allow 2055/udp
+
+
+--------------------------------------------------------------
+BUOC 6. KIEM TRA CONG DANG LANG NGHE
+--------------------------------------------------------------
+
+sudo ss -ulpn | grep 514
+sudo ss -tlpn | grep 514      # neu bat TCP
+
+Ket qua dung: thay rsyslogd lang nghe tren 0.0.0.0:514.
+
+
+--------------------------------------------------------------
+BUOC 7. KIEM TRA NHAN LOG TU THIET BI
+--------------------------------------------------------------
+
+# Tren mot may khac nam trong dai IP da khai bao (khong phai tu chinh server):
+logger -n <IP_server> -P 514 -d "%SW_DAI-4-DHCP_SNOOPING_DENY: test"
+
+# Tren server, xem log:
+sudo ls -R /var/log/network-devices/
+sudo tail -f /var/log/network-devices/security-alerts.log
+sudo tail -f /var/log/network-devices/<IP_thiet_bi>/$(date +%Y-%m-%d).log
+
+# Bat goi tin de debug:
+sudo tcpdump -ni any udp port 514
+
+Cau hinh thiet bi Cisco gui syslog:
+
+logging host <IP_server>
+logging trap informational
+logging source-interface <interface>
+service timestamps log datetime msec
+
+
+--------------------------------------------------------------
+BUOC 8. GAN THUOC TINH APPEND-ONLY CHO FILE CANH BAO
+--------------------------------------------------------------
+
+(Chi lam SAU khi da xac nhan rsyslog ghi log binh thuong.)
+
+sudo chattr +a /var/log/network-devices/security-alerts.log
+lsattr /var/log/network-devices/security-alerts.log
+
+Ket qua dung co co 'a':  -----a--------------
+
+Luu y:
+ - Append-only chi chong sua/xoa thong thuong, user root van co the go
+   co bang "chattr -a". De chong gia mao tot hon, nen chuyen tiep log
+   sang server log rieng (SIEM) hoac dung remote syslog thu hai.
+ - UDP co the bi gia mao IP nguon, nen dung firewall gioi han nguon.
+
+
+--------------------------------------------------------------
+BUOC 9. LOGROTATE CHO FILE APPEND-ONLY + DON FILE CU
+--------------------------------------------------------------
+
+sudo nano /etc/logrotate.d/network-security-alerts
+
+Noi dung:
+
+/var/log/network-devices/security-alerts.log {
+    daily
+    rotate 90
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 syslog adm
+    sharedscripts
+    prerotate
+        /usr/bin/chattr -a /var/log/network-devices/security-alerts.log || true
+    endscript
+    postrotate
+        /usr/lib/rsyslog/rsyslog-rotate || true
+        /usr/bin/chattr +a /var/log/network-devices/security-alerts.log || true
+    endscript
+}
+
+Kiem tra thu:
+sudo logrotate -d /etc/logrotate.d/network-security-alerts
+
+Log theo thiet bi da duoc chia san theo ngay, chi can xoa file cu:
+
+echo '30 2 * * * root find /var/log/network-devices -type f -name "*.log" -mtime +90 ! -name "security-alerts.log" -delete' | sudo tee /etc/cron.d/network-devices-cleanup
+
+
+--------------------------------------------------------------
+XU LY SU CO THUONG GAP
+--------------------------------------------------------------
+
+* Loi "unable to bind to address / address already in use":
+  Do khai bao imudp/imtcp trung lap. Kiem tra:
+  grep -rn "imudp\|imtcp" /etc/rsyslog.conf /etc/rsyslog.d/
+
+* Log van lot vao /var/log/syslog:
+  File cau hinh chua duoc nap truoc 50-default.conf. Dam bao ten file
+  bat dau bang 10- va co lenh "stop".
+
+* Khong tao duoc thu muc / file:
+  sudo chown -R syslog:adm /var/log/network-devices
+  Xem loi: journalctl -u rsyslog -n 50
+
+* Khong thay log den:
+  - sudo tcpdump -ni any udp port 514
+  - Kiem tra ufw, ACL giua thiet bi va server
+  - Kiem tra "logging host" tren thiet bi
+
+* Xem loi cu phap:
+  sudo rsyslogd -N1
+
+==============================================================
