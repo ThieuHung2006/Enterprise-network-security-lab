@@ -221,56 +221,97 @@ Once the forged replies are blocked, the victim's ARP entry returns to the legit
 
 # 4. WAN Edge & Core Infrastructure Hardening
 
-## 4.1. Edge BGP Peering Security (ASBR ↔ ISP_PEER)
-To shield the enterprise border gateway from route hijacking, unauthorized BGP session establishment, and off-path TCP attacks, three defensive mechanisms were instituted:
+## 4.1. Edge BGP peering security (`ASBR` ↔ `ISP_PEER`)
 
-1. **RFC 2385 TCP MD5 Signature**: Applied cryptographic message integrity verification across TCP port 179 (password `CiscoBGP@123`). Unauthorized peers transmitting synchronization or reset packets are dropped at the kernel level (`%TCP-6-BADAUTH`).
-2. **RFC 5082 Generalized TTL Security Mechanism (GTSM)**: Configured `neighbor 203.0.113.2 ttl-security hops 1`. BGP packets are transmitted with TTL=255, and the receiving interface accepts only packets where TTL≥254. This completely neutralizes multi-hop spoofed packets injected from the public Internet.
-3. **Route Policy Enforcement (Prefix-Lists)**:
-   - **Inbound (`IN_FROM_ISP`)**: Restricts ingress updates strictly to the Default Route (`0.0.0.0/0`) and specific test IP (`8.8.8.8/32`), rejecting Bogons and unintended transit prefixes.
-   - **Outbound (`OUT_TO_ISP`)**: Restricts enterprise route advertisement solely to the owned public allocation (`203.0.113.0/30`), eliminating accidental RFC 1918 leaks and unauthorized transit service.
+The border router is the point where external parties can send traffic at the network, so the eBGP session is protected in three ways:
 
-*Validation:* The following output confirms the established BGP state, TCP MD5 authentication, and active prefix-list enforcement on the ASBR:
-![BGP Hardening PoC](images/ebgp-hardening-poc.png)
+1. **TCP MD5 signature (RFC 2385):** each TCP segment of the BGP session carries a keyed hash on port 179 (the shared key is not published in this document). Segments from a peer without the key fail validation and are dropped; the router logs this as `%TCP-6-BADAUTH`. MD5 is an older mechanism, and TCP-AO is its modern replacement.
+2. **GTSM (RFC 5082):** configured with `neighbor 203.0.113.2 ttl-security hops 1`. Legitimate BGP packets from a directly connected peer are sent with TTL 255, and the router accepts only packets with TTL of 254 or higher. Packets forged by a host that is more than one hop away arrive with a lower TTL and are dropped.
+3. **Prefix-list policy:**
+   - **Inbound (`IN_FROM_ISP`):** only the default route (`0.0.0.0/0`) and the test address `8.8.8.8/32` are accepted. Bogons and unintended transit prefixes are rejected.
+   - **Outbound (`OUT_TO_ISP`):** only the owned public allocation (`203.0.113.0/30`) is advertised. This stops RFC 1918 prefixes from leaking and stops the router from acting as transit.
+
+**Evidence**
+
+![eBGP Hardening](images/ebgp-hardening-poc.png)
+
+*Figure 16b: eBGP hardening on `ASBR`: neighbor configuration, session state and the two prefix-lists (the MD5 key is blacked out).*
+
+- **Neighbor configuration:** the `router bgp 65000` section shows all three controls on the single peer `203.0.113.2` (AS 64496): the MD5 `password`, `ttl-security hops 1`, and the prefix-lists `IN_FROM_ISP` (in) and `OUT_TO_ISP` (out).
+- **Session state:** the neighbor is `Established` (up for 00:10:03), and the output confirms that both prefix filters are attached to the session. The protections therefore do not stop the legitimate peer from coming up.
+- **Prefix-lists:** `IN_FROM_ISP` permits only `0.0.0.0/0` and `8.8.8.8/32`, and `OUT_TO_ISP` permits only `203.0.113.0/30`. Each ends with an explicit `deny 0.0.0.0/0 le 32`, so every other prefix is rejected in that direction.
+
+This screenshot proves that the controls are configured and that the session works with them. It does not yet show them blocking anything. A negative test is listed in section 6.
+
+> In this lab the "owned allocation" is the `/30` peering subnet itself, which is a simplification. A real deployment would advertise the public block assigned to the enterprise.
 
 ## 4.2. Internal Transit (OSPF Area 0, MPLS LDP & NAT Overload)
-- **OSPF Area 0 Core Fabric**: Established reliable interior dynamic routing spanning ASBR, CORE_ROUTER, and DIST_SWITCH. ASBR injects default routing downward via `default-information originate always`.
-- **MPLS Core**: Enabled MPLS tag forwarding across Core transit links (`mpls ip`) utilizing reserved label spaces (100 - 199) to demonstrate high-throughput label-switched paths.
-- **Edge Source PAT (NAT Overload)**: Configured standardized overload translation on ASBR (`interface Ethernet0/1 overload`), converting internal corporate subnets (`192.168.10.0/24`, `10.10.99.0/24`, `10.0.0.0/16`) to the routable interface address for full outbound Internet access.
 
-## 4.3. Technical Evidence & Verification (Screenshots)
-The screenshots below come from the monitoring tools and network devices used during testing.
+- **OSPF Area 0:** `ASBR`, `CORE_ROUTER` and `DIST_SWITCH` run OSPF in Area 0 over the routed links, so every internal subnet is reachable. `ASBR` advertises a default route into OSPF with `default-information originate always`, which gives the inside routers a path toward the Internet.
+- **MPLS LDP:** `mpls ip` is enabled on the core transit links with a label range of 100–199, so LDP label forwarding can be observed on the core. No VPN service is built on it in this lab.
+- **NAT overload (PAT):** `ASBR` translates the internal subnets (`192.168.10.0/24`, `10.10.99.0/24`, `10.0.0.0/16`) to the address of its WAN interface (`interface Ethernet0/1 overload`). Internal hosts can therefore reach the simulated Internet (`8.8.8.8`) through a single public address.
 
-**NetFlow Setup Overview:** NetFlow v9 is configured on the `CORE_ROUTER` with ingress/egress flow export enabled on all primary interfaces. The flow data is transmitted to the `Syslog-NOC` server (10.10.99.10) over UDP port 2055, where it is collected and analyzed using the `nfcapd` and `nfdump` toolset.
+## 4.3. Technical Evidence & Verification
 
-### Traffic visibility with NetFlow (`CORE_ROUTER`)
+Syslog (section 3) reports **events**: a port shut down, a violation, a BGP session going down. NetFlow adds a view of **traffic behavior**: who is talking, how much, and on which ports. Together they let the NOC see both what a device reported and what the network was actually carrying. The screenshots below come from the collector and the network devices used during testing.
 
-NetFlow summarizes traffic as *flows* (source and destination address, protocol, ports, packet and byte counts). That is enough to see who is talking, how much, and on which ports, without capturing packets.
+### NetFlow setup
 
-**Initial Verification (ICMP Ping Test):** To verify NetFlow operation, initial ICMP echo requests were generated from the Kali node targeted at the NOC subnet. By executing the flow cache verification commands directly on the `CORE_ROUTER` CLI, the router successfully listed these test packets as active flow entries. This confirmed that telemetry data was being correctly captured and exported before initiating larger-scale attacks.
+NetFlow v9 is configured on `CORE_ROUTER`, with flow export enabled in both directions (ingress and egress) on its primary interfaces. The router exports the flow records to `Syslog_NOC` (`10.10.99.10`) over UDP port 2055, where they are collected with `nfcapd` and analyzed with `nfdump`.
 
-![DoS Flood 1](images/netflow_icmp_flood_dos_summary.png)
-<br>
-![DoS Flood 2](images/netflow_icmp_flood_dos.png)
-*Figures 17 and 18: an ICMP flood as seen in NetFlow data.*
+```text
+! CORE_ROUTER (reference excerpt, repeated on each primary interface)
+ip flow-export version 9
+ip flow-export destination 10.10.99.10 2055
+interface Ethernet0/0
+ ip flow ingress
+ ip flow egress
+```
+
+**Initial verification (ICMP ping test).** Before any attack was run, ICMP echo requests were sent from the Kali node toward the NOC subnet. The flow cache on `CORE_ROUTER` listed these packets as active flow entries, which confirmed that flow data was being captured on the router and exported to the collector. This gave a known baseline for the larger tests that follow.
+
+### Traffic visibility with NetFlow
+
+![ICMP Flood in NetFlow](images/netflow_icmp_flood_dos.png)
+
+*Figure 17: an ICMP flood as seen in NetFlow data on the collector.*
+
+The flood appears as flow records from the attacking host with far larger packet and byte counts than the normal traffic around it. This is how bandwidth saturation shows up in flow data: the router does not need to capture packets to reveal which host is generating the load.
 
 ![Top Talkers](images/netflow_top5_ip_bytes.png)
-*Figure 19: top talkers by IP address and bytes.*
+
+*Figure 18: top talkers ranked by IP address and bytes.*
+
+Ranking hosts by bytes is the quickest way to find the source of unusual load. Here it points to the host behind the flood, so the same data set moves from "something is using the bandwidth" to "this address is doing it".
 
 ![C2 Traffic](images/netflow_threat_hunting_c2_beaconing.png)
-*Figure 20: threat hunting: reverse-shell style traffic on TCP port 4444.*
+
+*Figure 19: threat hunting: reverse-shell style traffic on TCP port 4444.*
+
+Flow records carry the destination port, so unusual ports can be searched for directly. TCP 4444 is a common default for reverse shells, which makes it a useful example of a command-and-control indicator that is visible in flow data even without looking at packet contents.
 
 ### Log integrity and alert review
 
 ![Log Hardening](images/log_hardening_chattr_append.png)
-*Figure 21: log file protection with `chattr +a`.*
-The `a` attribute makes the syslog file append-only: new lines can be added, but existing entries cannot be edited or truncated unless the attribute is removed first (which requires root). This protects the evidence from accidental or casual tampering.
+
+*Figure 20: log file protection with `chattr +a`.*
+
+The `a` attribute makes the syslog file append-only: new lines can be added, but existing entries cannot be edited or truncated unless the attribute is removed first, which requires root. The attribute can be checked with `lsattr`. This protects the evidence from accidental or casual tampering, though it does not stop an attacker who already has root.
 
 ![Core Telemetry](images/syslog-core-telemetry.png)
-*Figure 22: routing and interface events from the core devices collected by the syslog server.*
+
+*Figure 21: routing and interface events from the core devices collected by the syslog server.*
+
+Routing and interface changes from several devices are stored in one file with timestamps, so an event can be compared across devices when investigating.
 
 ![Security Alerts](images/syslog_security_alerts.png)
-*Figure 23: security alerts collected centrally: Port-Security events and BGP session flaps.*
+
+*Figure 22: security alerts collected centrally: Port-Security events and BGP session flaps.*
+
+Security events from the access switch and routing events from the edge end up in the same place. This is the view the NOC would review first: the access-layer violations from section 3 sit next to the BGP session changes from section 4.1.
+
+---
+
 # 5. Resume & CV Highlights
 
 *Short bullet points for a Projects / Technical Experience section:*
