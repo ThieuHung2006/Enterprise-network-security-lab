@@ -247,34 +247,30 @@ The screenshots below come from the monitoring tools and network devices used du
 
 NetFlow summarizes traffic as *flows* (source and destination address, protocol, ports, packet and byte counts). That is enough to see who is talking, how much, and on which ports, without capturing packets.
 
-![Kali Ping Test](images/kali_icmp_ping_test.png)
-*Figure 17: test traffic: ICMP echo requests generated from the Kali node.*
-
-![Router Cache](images/core_router_flow_cache.png)
-*Figure 18: the flow cache on `CORE_ROUTER` listing the test traffic as flows.*
+**Initial Verification (ICMP Ping Test):** To verify NetFlow operation, initial ICMP echo requests were generated from the Kali node targeted at the NOC subnet. By executing the flow cache verification commands directly on the `CORE_ROUTER` CLI, the router successfully listed these test packets as active flow entries. This confirmed that telemetry data was being correctly captured and exported before initiating larger-scale attacks.
 
 ![DoS Flood 1](images/netflow_icmp_flood_dos_summary.png)
 <br>
-![DoS Flood 2](images/netflow_icmp_flood_dos_2.png)
-*Figures 19 and 20: an ICMP flood as seen in NetFlow data.*
+![DoS Flood 2](images/netflow_icmp_flood_dos.png)
+*Figures 17 and 18: an ICMP flood as seen in NetFlow data.*
 
-![Top Talkers](images/netflow_top5_ip_bytes_2.png)
-*Figure 21: top talkers by IP address and bytes.*
+![Top Talkers](images/netflow_top5_ip_bytes.png)
+*Figure 19: top talkers by IP address and bytes.*
 
 ![C2 Traffic](images/netflow_threat_hunting_c2_beaconing.png)
-*Figure 22: threat hunting: reverse-shell style traffic on TCP port 4444.*
+*Figure 20: threat hunting: reverse-shell style traffic on TCP port 4444.*
 
 ### Log integrity and alert review
 
-![Log Hardening](images/log_hardening_chattr_append_2.png)
-*Figure 23: log file protection with `chattr +a`.*
+![Log Hardening](images/log_hardening_chattr_append.png)
+*Figure 21: log file protection with `chattr +a`.*
 The `a` attribute makes the syslog file append-only: new lines can be added, but existing entries cannot be edited or truncated unless the attribute is removed first (which requires root). This protects the evidence from accidental or casual tampering.
 
-![Core Telemetry](images/syslog-core-telemetry_2.png)
-*Figure 24: routing and interface events from the core devices collected by the syslog server.*
+![Core Telemetry](images/syslog-core-telemetry.png)
+*Figure 22: routing and interface events from the core devices collected by the syslog server.*
 
 ![Security Alerts](images/syslog_security_alerts.png)
-*Figure 25: security alerts collected centrally: Port-Security events and BGP session flaps.*
+*Figure 23: security alerts collected centrally: Port-Security events and BGP session flaps.*
 # 5. Resume & CV Highlights
 
 *Short bullet points for a Projects / Technical Experience section:*
